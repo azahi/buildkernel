@@ -1,4 +1,4 @@
-.TH BUILDKERNEL 8 "Version 1.0.37: July 2020"
+.TH BUILDKERNEL 8 "Version 2.0.0: Mar 2021"
 .SH NAME
 buildkernel \- build secure boot kernel, save to EFI system partition
 .SH SYNOPSIS
@@ -18,12 +18,6 @@ the target (final) init system is  \fBsystemd\fR(1).
 (As of version 1.0.11, \fBOpenRC\fR(8) is also supported as a target
 init system.)
 
-To facilitate this, \fBbuildkernel\fR will create a statically linked version
-of \fBgpg\fR(1) \(em one which furthermore does not require \fBpinentry\fR \(em
-and include this in the initramfs (unless \fBLUKSKEYFILE\fR is
-left blank in \fI/etc/buildkernel.conf\fR: see \fBbuildkernel.conf\fR(5)
-for details).
-
 It will also automatically set the necessary kernel configuration parameters,
 including the command line, sign the resulting kernel if possible,
 then update the EFI boot list if required.
@@ -32,7 +26,7 @@ The \fBbuildkernel\fR utility can be invoked in non-interactive (default) or
 interactive mode (see the \fB--ask\fR option, below).
 Non-interactive mode is suitable for use in a scripted invocation.
 
-Certain key options can be specified via the configuration file, 
+Certain key options can be specified via the configuration file,
 \fI/etc/buildkernel.conf\fR: again, see \fBbuildkernel.conf\fR(5) for details.
 
 Although \fBbuildkernel\fR is targetted primarily at the use-case where the
@@ -65,11 +59,11 @@ builds the kernel, and its modules, with the specified configuration; in this fi
 .IP \(bu 2
 builds any external modules (such as those required for VirtualBox), using \fBemerge @module-rebuild\fR, if you so specify (using the option \fB--rebuild-external-modules\fR), and optionally signs them (if you have set up the variables \fBKERNEL_SIGNING_CERT\fR and \fBKERNEL_SIGNING_KEY\fR in \fI/etc/buildkernel.conf\fR);
 .IP \(bu 2
-creates a first cut of the initramfs using \fBgenkernel\fR(8) (see below for more details); this will contain \fBgenkernel\fR(8)'s \fBinit\fR(8) script, compiled modules, any necessary firmware (if you haven't deblobbed), and a minimal set of binaries; it does \fInot\fR at this point contain a static copy of \fBgpg\fR;
+creates a first cut of the initramfs using \fBgenkernel\fR(8) (see below for more details); this will contain \fBgenkernel\fR(8)'s \fBinit\fR(8) script, compiled modules, any necessary firmware (if you haven't deblobbed), and a minimal set of binaries;
 .IP \(bu 2
 unpacks the initramfs, to the \fI/boot/initramfs\fR directory;
 .IP \(bu 2
-modifies the initramfs by copying the \fI/etc/modprobe.d\fR directory contents across to it, and the static v1.x \fBgpg\fR(1) binary mentioned earlier (if this does not already exist, \fBbuildkernel\fR will create it);
+modifies the initramfs by copying the \fI/etc/modprobe.d\fR directory contents across to it;
 .IP \(bu 2
 calls your user hook function \fBuser_modify_initramfs\fR if you have defined it in \fI/etc/genkernel.conf\fR (you don't need it to make the boot work);
 .IP \(bu 2
@@ -217,12 +211,6 @@ This must be set to the partition UUID of the \fBLUKS\fR partition on your fixed
 drive, which contains a set of \fBlvm\fR logical volumes (for root, home and swap
 directories).
 
-By default, \fBbuildkernel\fR assumes that the \fBLUKS\fR
-partition is secured with by a
-\fBgpg\fR(1) encrypted keyfile. At boot, you are prompted to enter the
-passphrase for this file. Because both the keyfile, and a passphrase to unlock
-it, are required, dual-factor security is obtained.
-
 Also, please note that it is assumed that your \fBLUKS\fR filesystem exists on the
 partition of a GPT-formatted drive; if this is \fInot\fR the case (for example, if
 you have your \fBLUKS\fR filesystem on an MBR partition, or if you have luksFormat-ed
@@ -252,6 +240,7 @@ A post-reboot run of \fBgenup\fR(8) will achieve this.
 .SH COPYRIGHT
 .nf
 Copyright \(co 2014-2020 sakaki
+Copyright \(co 2021 Azat Bahawi
 License GPLv3+ (GNU GPL version 3 or later)
 <http://gnu.org/licenses/gpl.html>
 
@@ -259,10 +248,10 @@ This is free software, you are free to change and redistribute it.
 There is NO WARRANTY, to the extent permitted by law.
 .fi
 .SH AUTHORS
-sakaki \(em send bug reports or comments to <sakaki@deciban.com>
+sakaki
+Azat Bahawi
 .SH "SEE ALSO"
 .BR emerge (1),
-.BR gpg (1),
 .BR make (1),
 .BR nice (1),
 .BR systemd (1),

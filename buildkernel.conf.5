@@ -23,7 +23,7 @@ You can also run \fBbuildkernel --easy-setup\fR to make changes to this file
 in a structured manner; doing so is recommended when starting out,
 to avoid obvious errors.
 .SH VARIABLES
-The following variables are mandatory and \fImust\fR be set in 
+The following variables are mandatory and \fImust\fR be set in
 \fB/etc/buildkernel.conf\fR, or \fBbuildkernel\fR(8)
 will not function properly:
 .RS
@@ -39,11 +39,6 @@ This \fImust\fR be set to the partition UUID of the \fBLUKS\fR partition on your
 drive, which contains a set of \fBlvm\fR logical volumes (for root, home and swap
 directories).
 
-\fBbuildkernel\fR assumes that the \fBLUKS\fR partition is secured with by a
-\fBgpg\fR(1) encrypted keyfile. At boot, you are prompted to enter the
-passphrase for this file. Because both the keyfile, and a passphrase to unlock
-it, are required, dual-factor security is obtained.
-
 Also, please note that it is assumed that your \fBLUKS\fR filesystem exists on the
 partition of a GPT-formatted drive; if this is \fInot\fR the case (for example, if
 you have your \fBLUKS\fR filesystem on an MBR partition, or if you have luksFormat-ed
@@ -53,7 +48,7 @@ set the \fBLUKS\fR path directly, via the
 (Most users will \fInot\fR need to do this, however.)
 .RE
 
-The following variables are optional, and \fImay\fR be set 
+The following variables are optional, and \fImay\fR be set
 in \fB/etc/buildkernel.conf\fR if their defaults
 are not suitable for your system:
 .RS
@@ -65,23 +60,6 @@ the correct path directly (where possible, use \fI/dev/disk/by-uuid/<...>\fR
 as the value). This feature is provided as a convenience only; most users should
 not need to use it (and so should leave the \fBCRYPTPATHMAP\fR variable
 commented out).
-.br
-.TP
-.BR KEYFILEPARTUUID
-This should be set to the partition UUID of the partition containing your
-\fBgpg\fR(1)-encrypted keyfile, used to unlock the \fBLUKS\fR partition (see
-above). The file should be called \fIluks-key.gpg\fR, and be stored in the top-level
-directory of this partition. If unspecified, \fBKEYFILEPARTUUID=EFIPARTUUID\fR will
-be assumed (i.e., that you have a single USB key holding both the EFI stub kernel and
-the encrypted keyfile).
-.br
-.TP
-.BR LUKSKEYFILE
-If you wish to rely only on the fallback passphrase (assuming you have set
-one up) and no keyfile, set this to the empty string (in which case,
-\fBKEYFILEPARTUUID\fR will be ignored) (and no static \fBgpg\fR(1)
-will be built into the initramfs). Defaults to \fBluks-key.gpg\fR if
-unset.
 .br
 .TP
 .BR LINUXBUILDDIR
@@ -125,11 +103,10 @@ boot issues on some systems.
 .br
 .TP
 .BR KEYMAP
-This variable specifies the keymap to be used in early userspace (that is, when
-the initramfs-based system is prompting you for a passphrase to unlock the
-\fBgpg\fR(1)-encrypted keyfile). It is \fInot\fR a standard locale keymap string,
-but rather one recognized by the \fI/usr/share/genkernel/defaults/initrd.d/00-keymaps.sh\fR
-script. If not specified here, \fBKEYMAP="us"\fR will be assumed.
+This variable specifies the keymap to be used in early userspace. It is
+\fInot\fR a standard locale keymap string, but rather one recognized by the
+\fI/usr/share/genkernel/defaults/initrd.d/00-keymaps.sh\fR script. If not
+specified here, \fBKEYMAP="us"\fR will be assumed.
 .br
 .TP
 .BR PLYMOUTHTHEME
@@ -151,8 +128,8 @@ Most users will not need to override the default.
 .TP
 .BR EFIBOOTDIR
 This is the directory (under the EFI system partition root) in which the EFI-stub
-kernel will be saved. It defaults to \fI/EFI/Boot\fR, 
-which is the 'magic' path that most UEFI BIOSes will search. 
+kernel will be saved. It defaults to \fI/EFI/Boot\fR,
+which is the 'magic' path that most UEFI BIOSes will search.
 If you are on a system that
 expects \fIonly\fR a Microsoft boot loader, you may have to change this path to
 \fI/EFI/Microsoft/Boot\fR.
@@ -162,7 +139,7 @@ Most users will not need to override the default.
 .TP
 .BR INITSYSTEM
 If you are targeting \fBOpenRC\fR(8) (rather than \fBsystemd\fR(1)) boot,
-uncomment this variable, 
+uncomment this variable,
 and set it to \fB"openrc"\fR (the capitalization is unimportant).
 If left commented out, a value of \fB"systemd"\fR will be assumed.
 
@@ -268,7 +245,6 @@ sakaki \(em send bug reports or comments to <sakaki@deciban.com>
 .SH "SEE ALSO"
 .BR bash (1),
 .BR cpio (1L),
-.BR gpg (1),
 .BR systemd (1),
 .BR cryptsetup (8),
 .BR genkernel (8),

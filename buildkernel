@@ -4,6 +4,7 @@
 # config is conformed, then sign if possible and copy to EFI boot partition.
 #
 # Copyright (c) 2014-2020 sakaki <sakaki@deciban.com>
+# Copyright (c) 2021 Azat Bahawi <azahi@teknik.io>
 #
 # License (GPL v3.0)
 # ------------------
@@ -28,10 +29,10 @@ shopt -s nullglob
 
 # Scroll to the bottom of this script to follow the main program flow.
 
-# ********************** variables ********************* 
+# ********************** variables *********************
 PROGNAME="$(basename "${0}")"
 CONFFILE="/etc/${PROGNAME}.conf"
-VERSION="1.0.37"
+VERSION="2.0.0"
 ETCPROFILE="/etc/profile"
 DEFAULTEFIBOOTFILE="bootx64.efi"
 EFIBOOTFILE="${DEFAULTEFIBOOTFILE}"
@@ -52,8 +53,6 @@ OLDSUFFIX=".old"
 PARTUUIDDEVDIR="/dev/disk/by-partuuid"
 DISKIDDEVDIR="/dev/disk/by-id"
 IDDEVDIR="/dev/disk/by-id"
-DEFAULTLUKSKEYFILE="luks-key.gpg"
-LUKSKEYFILE="${DEFAULTLUKSKEYFILE}"
 MODPROBEDIR="/etc/modprobe.d"
 CMDLINE_ROOT="/dev/ram0"
 SYSTEMD_INIT="/usr/lib/systemd/systemd"
@@ -105,10 +104,6 @@ VERBOSITY=1
 PREFIXSTRING="* "
 SHOWPREFIX="${GREEN_TEXT}${PREFIXSTRING}${RESET_ATTS}"
 SHOWSUFFIX=""
-GPG1PATHFROM="/usr/bin/staticgpg"
-GPG1PATHTO="${INITRAMFSDIR}/usr/bin/gpg"
-GPGBUILDDIR="/root/tmpgpgbuild"
-TMPGPGPATH="${GPGBUILDDIR}/usr/bin/gpg"
 declare -i USINGUSBKEYFOREFI=0
 declare -i BACKUPOLDKERNEL=1
 declare -i BUILT_EXTERNAL_MODULES=1
@@ -127,14 +122,12 @@ DEFAULTINITSYSTEM="systemd"
 INITSYSTEM="${DEFAULTINITSYSTEM}"
 # following variable is conformed on installation by ebuild
 # (to reflect setting of "plymouth" USE flag)
-USE_PLYMOUTH=true
+USE_PLYMOUTH=false
 VERBOSITYFLAG=""
 ASKFLAG=""
 ALERTFLAG=""
 PORTAGEINFO=""
 MAKE=""
-# following array variables set by find_all_gpg_keyfile_partitions function
-declare -a GPGUUIDS GPGPARTNAMES GPGDEVNAMES GPGPARTNUMS
 # following array variables set by find_all_luks_partitions function
 declare -a LUKSUUIDS LUKSPARTNAMES LUKSDEVNAMES LUKSPARTNUMS
 declare -a LUKSONUSBS
@@ -159,7 +152,7 @@ declare -i CONFIGDIRTY=0
 # set if CRYPTPATHMAP declared in config file
 declare -i CRYPTPATHMAPFORCED=0
 # archived prior versions of key config variables
-PROCVARS=("EFIPARTUUID" "CRYPTPARTUUID" "KEYFILEPARTUUID" "LUKSKEYFILE" \
+PROCVARS=("EFIPARTUUID" "CRYPTPARTUUID" "KEYFILEPARTUUID" \
     "EFIBOOTDIR" "EFIBOOTFILE" "PLYMOUTHTHEME" "KEYMAP" "INITSYSTEM")
 NEXTVAR=""
 for NEXTVAR in "${PROCVARS[@]}"; do
@@ -187,7 +180,7 @@ declare -i ARG_REBUILD_EXTERNAL_MODULES=0 ARG_ALERT=0
 # non-boolean arguments
 declare -i ADJUSTMENT=19
 
-# ***************** various functions ****************** 
+# ***************** various functions ******************
 cleanup_and_exit_with_code() {
     # add any additional cleanup code here
     set +e
@@ -334,7 +327,7 @@ mount_and_remember() {
     local DEVPATH="${1}"
     local MOUNTPOINT="${2}"
     local TYPE=${3:-""}
-    
+
     if [[ "${ALLMOUNTS[${MOUNTPOINT}]+_}" ]]; then
         warning "Attempt to mount '${MOUNTPOINT}' more than once"
     else
@@ -519,9 +512,6 @@ setup_final_variables() {
     fi
     KERNEL_CMD_LINE+="real_root=${CMDLINE_REAL_ROOT} rootfstype=${CMDLINE_ROOTFSTYPE} "
     KERNEL_CMD_LINE+="real_init=${CMDLINE_REAL_INIT} "
-    if [ -n "${LUKSKEYFILE}" ]; then
-        KERNEL_CMD_LINE+="root_keydev=${KEYFILEPATHMAP} root_key=${LUKSKEYFILE} "
-    fi
     if ((DISABLE_HIBERNATION==0)); then
         KERNEL_CMD_LINE+="real_resume=${CMDLINE_REAL_RESUME} "
     fi
@@ -572,34 +562,8 @@ find_all_usb_partitions() {
         fi
     done
 }
-find_all_gpg_keyfile_partitions() {
-    # overwrites the variables GPGUUIDS, GPGPARTNAMES, GPGDEVNAMES and
-    # GPGPARTNUMS
-    # we only look for non-LUKS partitions on attached USB devices
-    # we don't mount to check that the file is there
-    GPGUUIDS=(); GPGPARTNAMES=(); GPGDEVNAMES=(); GPGPARTNUMS=()
-    local NEXTPART
-    for NEXTPART in "${PARTUUIDDEVDIR}"/*; do
-        if [ -e "${NEXTPART}" ]; then
-            if ! cryptsetup isLuks "${NEXTPART}"; then
-                NEXTPART="${NEXTPART,,}"
-                local NEXTUUID="${NEXTPART##*/}"
-                local NEXTPARTNAME="$(readlink --canonicalize "${NEXTPART}")" # e.g. /dev/sda3
-                local NEXTDEVNAME="${NEXTPARTNAME%%[[:digit:]]*}"              # e.g. /dev/sda
-                local NEXTPARTNUM="${NEXTPARTNAME##*[^[:digit:]]}"              # e.g. 3
-                if partuuid_is_on_usb_device "${NEXTUUID}"; then
-                    # assign results (Bash treats arrays as unset if not assigned a value)
-                    GPGUUIDS=("${GPGUUIDS[@]:+${GPGUUIDS[@]}}" "${NEXTUUID}")
-                    GPGPARTNAMES=("${GPGPARTNAMES[@]:+${GPGPARTNAMES[@]}}" "${NEXTPARTNAME}")
-                    GPGDEVNAMES=("${GPGDEVNAMES[@]:+${GPGDEVNAMES[@]}}" "${NEXTDEVNAME}")
-                    GPGPARTNUMS=("${GPGPARTNUMS[@]:+${GPGPARTNUMS[@]}}" "${NEXTPARTNUM}")
-                fi
-            fi
-        fi
-    done
-}
 find_all_luks_partitions() {
-    # overwrites the variables LUKSUUIDS, LUKSPARTNAMES, LUKSDEVNAMES, 
+    # overwrites the variables LUKSUUIDS, LUKSPARTNAMES, LUKSDEVNAMES,
     # LUKSPARTNUMS and LUKSONUSBS
     LUKSUUIDS=(); LUKSPARTNAMES=(); LUKSPARTNAMES=(); LUKSDEVNAMES=()
     LUKSPARTNUMS=(); LUKSONUSBS=()
@@ -635,7 +599,7 @@ find_all_luks_partitions() {
 
 }
 find_all_efi_system_partitions() {
-    # overwrites the variables EFIUUIDS, EFIPARTNAMES, EFIDEVNAMES, 
+    # overwrites the variables EFIUUIDS, EFIPARTNAMES, EFIDEVNAMES,
     # EFIPARTNUMS and EFIONUSBS
     EFIUUIDS=(); EFIPARTNAMES=(); EFIPARTNAMES=(); EFIDEVNAMES=()
     EFIPARTNUMS=(); EFIONUSBS=()
@@ -762,7 +726,6 @@ warn_if_buildkernel_config_incomplete() {
     fi
 }
 interactively_set_buildkernel_config() {
-    find_all_gpg_keyfile_partitions
     find_all_luks_partitions
     find_all_efi_system_partitions
     find_all_efi_boot_entries
@@ -783,7 +746,6 @@ interactively_set_buildkernel_config() {
             case "${X}" in
                 "Set EFI system partition") set_efi_system_partition; break ;;
                 "Set LUKS root partition") set_luks_root_partition; break ;;
-                "Set LUKS key options") set_luks_key_options; break ;;
                 "Set EFI boot file path") set_efi_boot_file_path; break ;;
                 "Set boot splash options") set_boot_splash_options; break ;;
                 "Set boot-time keymap") set_boot_time_keymap; break ;;
@@ -796,7 +758,7 @@ interactively_set_buildkernel_config() {
         if ((DOEXIT==1 && DOSAVE==0 && CONFIGDIRTY==1)); then
             if ! test_yn_need_enter "Are you sure? Your changes will be lost. Proceed"; then
                 DOEXIT=0
-            fi 
+            fi
         fi
     done
     if ((DOSAVE==0)); then
@@ -840,31 +802,6 @@ save_buildkernel_config() {
         fi
     done
     printf "# End of automatically added section\n" >> "${CONFFILE}"
-    # copy the keyfile, if location or path has changed
-    if [[ -v OLD_LUKSKEYFILE && -v LUKSKEYFILE  && \
-        ( -v OLD_EFIPARTUUID || -v OLD_KEYFILEPARTUUID ) ]]; then
-        local OLD_ACTUAL_KEYFILEPARTUUID="${OLD_KEYFILEPARTUUID:-${OLD_EFIPARTUUID}}"
-        local ACTUAL_KEYFILEPARTUUID="${KEYFILEPARTUUID:-${EFIPARTUUID}}"
-        if [[ -n "${LUKSKEYFILE}" && -n "${OLD_LUKSKEYFILE}" && \
-            ( "${ACTUAL_KEYFILEPARTUUID}" != "${OLD_ACTUAL_KEYFILEPARTUUID}" || \
-              "${LUKSKEYFILE}" != "${OLD_LUKSKEYFILE}" ) ]]; then
-            show "Your LUKS keyfile location has changed:"
-            show "Old PARTUUID: ${OLD_ACTUAL_KEYFILEPARTUUID}, filename: '${OLD_LUKSKEYFILE}'"
-            show "New PARTUUID: ${ACTUAL_KEYFILEPARTUUID}, filename: '${LUKSKEYFILE}'"
-            if test_yn_need_enter "Would you like to copy the keyfile across now"; then
-                copy_file_from_partition_to_partition \
-                    "${OLD_ACTUAL_KEYFILEPARTUUID}" "/${OLD_LUKSKEYFILE}" \
-                    "${ACTUAL_KEYFILEPARTUUID}" "/${LUKSKEYFILE}" \
-                    "keyfile copied successfully (original retained)" \
-                    "Error copying keyfile - please copy manually"
-            else
-                warning "File not copied"
-                warning "Please ensure '${LUKSKEYFILE}' available on"
-                warning "partition ${ACTUAL_KEYFILEPARTUUID}"
-                warning "before attempting to reboot"
-            fi
-        fi
-    fi
     # it may be dangerous to leave /boot/efi mounted, if the user has
     # changed its location, so unmount it now if necessary
     if mount | grep -q " ${EFIROOTDIR} " > /dev/null; then
@@ -896,7 +833,6 @@ set_efi_system_partition() {
                 show "EFI system partition selected as follows:"
                 show_efi_system_partitions
                 warn_if_efi_boot_file_clashes_with_windows_bootloader
-                make_key_file_location_expicit_if_necessary_and_wanted
             elif ((N==1+NUMEFIPARTS)); then
                 DOEXIT=1;
             fi
@@ -940,7 +876,7 @@ set_luks_root_partition() {
 }
 show_current_key_config_status() {
     # main things we need are: EFIPARTUUID, CRYPTPARTUUID, KEYFILEPARTUUID
-    # LUKSKEYFILE, EFIBOOTDIR, EFIBOOTFILE, PLYMOUTHTHEME, KEYMAP and INITSYSTEM
+    # EFIBOOTDIR, EFIBOOTFILE, PLYMOUTHTHEME, KEYMAP and INITSYSTEM
     local MODFLAG=""
     if ((CONFIGDIRTY==1)); then
         MODFLAG=" - MODIFIED"
@@ -955,8 +891,6 @@ show_current_key_config_status() {
         printf "  LUKS root partition UUID:   %-36s\n" "IGNORED, OVERRIDDEN BY CRYPTPATHMAP"
         printf "    (to '%s')\n" "${CRYPTPATHMAP}"
     fi
-    printf "  GPG keyfile partition UUID: %-36s\n" "${KEYFILEPARTUUID:-DEFAULT (=EFI system partition UUID)}"
-    printf "  GPG keyfile (for LUKS):     %-36s\n" "${LUKSKEYFILE:-NONE (using fallback passphrase)}"
     printf "  EFI boot directory:         %-36s\n" "${EFIBOOTDIR:-NEEDS SETTING}"
     printf "  EFI boot file:              %-36s\n" "${EFIBOOTFILE:-NEEDS SETTING}"
     printf "  Plymouth theme:             %-36s\n" "${PLYMOUTHTHEME:-NONE (textual boot)}"
@@ -967,27 +901,6 @@ show_current_key_config_status() {
         printf "  Init system:                %-36s\n" "OpenRC"
     fi
     printf "\n"
-}
-show_gpg_keyfile_partitions() {
-    local LASTITEM=${1:-""}
-    declare -i I=0 NUMGPGPARTS="${#GPGUUIDS[@]}"
-    if ((NUMGPGPARTS==0)); then
-        show "No potential keyfile partitions found on your machine"
-    else
-        printf "%3s %-36s %-10s %-3s %3s\n" "Num" "Partition UUID" "Path" "Use"
-        printf "%s\n" "--- ------------------------------------ ---------- ---"
-        for I in "${!GPGUUIDS[@]}"; do
-            local INUSE="[ ]"
-            if [[ ${KEYFILEPARTUUID:-""} == "${GPGUUIDS[$I]}" ]]; then
-                INUSE="[*]"
-            fi
-            printf "%2d) %-36s %-10s %3s\n" $((I+1)) "${GPGUUIDS[$I]}" \
-                "${GPGPARTNAMES[$I]}" "${INUSE}"
-        done
-    fi
-    if [ -n "${LASTITEM}" ]; then
-        printf "%2d) %s\n" $((NUMGPGPARTS+1)) "${LASTITEM}"
-    fi
 }
 show_luks_partitions() {
     local LASTITEM=${1:-""}
@@ -1046,18 +959,6 @@ show_efi_system_partitions() {
         printf "%2d) %s\n" $((NUMEFIPARTS+1)) "${LASTITEM}"
     fi
 }
-show_luks_key_status() {
-    if [ -n "${LUKSKEYFILE}" ]; then
-        show "Using a GPG-encrypted keyfile for LUKS:"
-        if [[ ! -v KEYFILEPARTUUID ]]; then
-            show " KEYFILEPARTUUID unset: assuming GPG keyfile on EFI system partition"
-        else
-            show " KEYFILEPARTUUID is currently set to '${KEYFILEPARTUUID}'"
-        fi
-    else
-        show "Using no keyfile, but relying on fallback passphrase for LUKS"
-    fi
-}
 show_efi_boot_file_status() {
     show "EFI boot file path: ${EFIBOOTDIR}/${EFIBOOTFILE}"
     show " (under EFI system partition mountpoint)"
@@ -1080,97 +981,6 @@ show_init_system_status() {
     else
         show "Targeting OpenRC init"
     fi
-}
-set_luks_key_options() {
-    local -i DOEXIT=0
-    declare -a LUKSKEYMENU=("Use GPG-encrypted keyfile on EFI system partition" \
-        "Use GPG-encrypted keyfile on specific USB partition..." \
-        "Use fallback passphrase (no keyfile)"  "GO BACK")
-    local X
-    until ((DOEXIT==1)); do
-        show "Current LUKS key settings:"
-        show_luks_key_status
-        show "Please choose your desired LUKS key setting (or GO BACK):"
-        select X in "${LUKSKEYMENU[@]}"; do
-            case "${X}" in
-                "Use GPG-encrypted keyfile on EFI system partition")
-                    if [[ "${LUKSKEYFILE}" != "${DEFAULTLUKSKEYFILE}" || -v KEYFILEPARTUUID ]]; then
-                        CONFIGDIRTY=1
-                    fi
-                    LUKSKEYFILE="${DEFAULTLUKSKEYFILE}"
-                    unset -v KEYFILEPARTUUID
-                    show "New LUKS key settings:"
-                    show_luks_key_status
-                    DOEXIT=1
-                    break ;;
-                "Use GPG-encrypted keyfile on specific USB partition...")
-                    set_luks_keyfile_partition
-                    DOEXIT=1
-                    break ;;
-                "Use fallback passphrase (no keyfile)")
-                    if [ -n LUKSKEYFILE ]; then
-                        CONFIGDIRTY=1
-                    fi
-                    LUKSKEYFILE=""
-                    show "New LUKS key settings:"
-                    show_luks_key_status
-                    DOEXIT=1
-                    break ;;
-                "GO BACK") DOEXIT=1; break ;;
-                *) warning "Please choose one of the menu options!"; break ;;
-            esac
-        done
-    done
-}
-set_luks_keyfile_partition() {
-    declare -i DOEXIT=0 NUMGPGPARTS="${#GPGUUIDS[@]}"
-    local NUMREG='^[0-9]+$'
-    until ((DOEXIT==1)); do
-        if ((NUMGPGPARTS==0)); then
-            warning "No potential keyfile partitions found on your machine"
-            warning "(only non-LUKS partitions on USB devices are allowed)"
-            warning "Please insert any devices before running ${PROGNAME}"
-            return 0
-        fi
-        show "Please choose which partition contains the GPG keyfile for LUKS:"
-        show " (only non-LUKS partitions on USB devices are shown below)"
-        show_gpg_keyfile_partitions "GO BACK"
-        printf "%s" "${PS3}"
-        local N
-        read -r N
-        if [[ "${N}" =~ ${NUMREG} ]]; then
-            if ((N>=1 && N<=NUMGPGPARTS)); then
-                # valid partition, set it
-                if [[ -v KEYFILEPARTUUID ]]; then
-                    if [[ "${KEYFILEPARTUUID}" != "${GPGUUIDS[$((N-1))]}" ]]; then
-                        CONFIGDIRTY=1;
-                    fi
-                else
-                    CONFIGDIRTY=1;
-                fi
-                if [[ "${LUKSKEYFILE}" != "${DEFAULTLUKSKEYFILE}" ]]; then
-                    CONFIGDIRTY=1
-                fi
-                LUKSKEYFILE="${DEFAULTLUKSKEYFILE}"
-                KEYFILEPARTUUID="${GPGUUIDS[$((N-1))]}"
-                DOEXIT=1;
-                show "GPG partition selected as follows:"
-                show_gpg_keyfile_partitions
-                if [[ -v EFIPARTUUID && "${EFIPARTUUID}" == "${KEYFILEPARTUUID}" ]]; then
-                    show "The partition you have selected is also the current EFI system partition"
-                    show "You can choose this explicitly in the LUKS key options menu, if you like"
-                    show "(unless you intend to change the EFI system partition now)"
-                fi
-                # check if EFIPARTUUID is set and same; if so, notify user
-                # and clear the KEYFILEPARTUUID variable
-            elif ((N==1+NUMGPGPARTS)); then
-                DOEXIT=1;
-            fi
-        fi
-        if ((DOEXIT==0)); then
-            warning "Please choose one of the menu options!"
-        fi
-    done
 }
 set_boot_time_keymap() {
     declare -i DOEXIT=0
@@ -1343,46 +1153,6 @@ warn_if_efi_boot_file_clashes_with_windows_bootloader() {
         warning "(as otherwise, the Windows bootloader may be overwritten)"
     fi
 }
-make_key_file_location_expicit_if_necessary_and_wanted() {
-    # whenever the EFIPARTUUID is changed, it is possible that an (implicitly
-    # defined) KEYFILEPARTUUID should then become explicit - so do this if
-    # need be (and warn if so)
-    if [[ ! -v KEYFILEPARTUUID && ! -v OLD_KEYFILEPARTUUID && -v EFIPARTUUID &&  \
-        -n "${LUKSKEYFILE}" && -n "${OLD_LUKSKEYFILE}" ]]; then
-        # key file location implicit, and was implicit on entry, but EFI location defined
-        if [[ -v OLD_EFIPARTUUID && "${EFIPARTUUID}" != "${OLD_EFIPARTUUID}" ]]; then
-            show "Previously, KEYFILEPARTUUID was unset, and so implicitly followed"
-            show "the value of EFIPARTUUID (the EFI system partition)."
-            show "Now you have changed EFIPARTUUID, you must choose what to do"
-            show "about the keyfile."
-            
-            local -i DOEXIT=0
-            declare -a KEYFILEMENU=("Keep keyfile in previous EFI system partition" \
-                "Move keyfile to new EFI system partition (retain implicit tracking)")
-            local X
-            until ((DOEXIT==1)); do
-                show "Please choose your desired option:"
-                select X in "${KEYFILEMENU[@]}"; do
-                    case "${X}" in
-                        "Keep keyfile in previous EFI system partition")
-                            show "OK, explicitly defining KEYFILEPARTUUID now"
-                            KEYFILEPARTUUID="${OLD_EFIPARTUUID}"
-                            DOEXIT=1
-                            break ;;
-                        "Move keyfile to new EFI system partition (retain implicit tracking)")
-                            show "OK, the init scripts will look for the keyfile in the newly"
-                            show "specified EFI system partition now (once you rebuild the kernel)"
-                            show "You will asked whether to physically copy over the keyfile"
-                            show "when you select 'Save and exit' from the main menu" 
-                            DOEXIT=1
-                            break ;;
-                        *) warning "Please choose one of the menu options!"; break ;;
-                    esac
-                done
-            done
-        fi
-    fi
-}
 copy_file_from_partition_to_partition() {
     # used to copy files from one partition to another
     # prints a warning only if not successful (you can specify text of this)
@@ -1408,7 +1178,7 @@ copy_file_from_partition_to_partition() {
     local FROMPARTNAME="$(readlink --canonicalize "${FROMEFIPARTPATH}")" # e.g. /dev/sda3
     local TOPARTNAME="$(readlink --canonicalize "${TOEFIPARTPATH}")" # e.g. /dev/sdb3
     local ALLMOUNTEDPARTS="$(df -P)"
-    local FROMMOUNT="$(grep "^${FROMPARTNAME}" <<<"${ALLMOUNTEDPARTS}" | perl -pe 's/^(\S+\s+){5}//')" 
+    local FROMMOUNT="$(grep "^${FROMPARTNAME}" <<<"${ALLMOUNTEDPARTS}" | perl -pe 's/^(\S+\s+){5}//')"
     local TOMOUNT="$(grep "^${TOPARTNAME}" <<<"${ALLMOUNTEDPARTS}" | perl -pe 's/^(\S+\s+){5}//')"
     if [ -n "${FROMMOUNT}" ]; then
         FROMPARTMOUNTEDONENTRY=1
@@ -1441,7 +1211,7 @@ copy_file_from_partition_to_partition() {
         # ensure parent directories exist
         mkdir --parents --verbose "${TOMOUNT}${TODIR}"
     fi
-    
+
     cp ${COPYFLAGS} "${FROMMOUNT}${FROMPATH}" "${TOMOUNT}${TOPATH}" && \
         show "${ONSUCCESSTEXT}" || warning "${ONERRORTEXT}"
     sync
@@ -1571,28 +1341,11 @@ conform_efi_boot_order_if_possible() {
         show "Appropriate entry already exists at the top of EFI boot list"
     fi
 }
-check_key_file_if_on_efi_system_partition () {
-    # We check for the presence of a key file ONLY if it is on the EFI system 
-    # partition, as this must be mounted on entry to this function
-    if [ -n "${LUKSKEYFILE}" ]; then
-        if [[ "${KEYFILEPARTUUID}" == "${EFIPARTUUID}" ]]; then
-            # keyfile should be on our already-mounted partition
-            if [ ! -s "${EFIROOTDIR}/${LUKSKEYFILE}" ]; then
-                die "The ${EFIPARTNAME} does not contain a LUKS key file"
-            fi
-        else
-            warning "Your keyfile partition is != the EFI system partition"
-            warning "Please ensure that ${LUKSKEYFILE} is present, on partition"
-            warning "${KEYFILEPARTUUID},"
-            warning "before attemping to reboot"
-        fi
-    fi
-}
 ensure_efi_partition_mounted() {
     MOUNTEDONENTRY=0
     if mount | grep -q " ${EFIROOTDIR} " > /dev/null; then
         # check it is the correct partition, otherwise unmount it (to stop bad
-        # things happening in the case where the user leaves an old partition 
+        # things happening in the case where the user leaves an old partition
         # mounted, changes the EFIPARTUUID in /etc/buildkernel.conf, then runs
         # buildkernel)
         local MOUNTEDPARTUUID="$(lsblk --noheadings --list --output="MOUNTPOINT,PARTUUID" | grep "^${EFIROOTDIR}[[:space:]]" | awk '{print $2;}')"
@@ -1628,7 +1381,6 @@ ensure_efi_partition_mounted() {
     else
         USINGUSBKEYFOREFI=0
     fi
-    check_key_file_if_on_efi_system_partition
 }
 setup_build_directory() {
     if [ -z "${LINUXBUILDDIR+x}" ]; then
@@ -1786,7 +1538,7 @@ allow_user_to_modify_config_graphically() {
             make ${CONFIGTYPE}
         else
             show "OK, autoconforming configuration using make ${CONFIGUPDATETYPE} instead..."
-            make ${CONFIGUPDATETYPE}        
+            make ${CONFIGUPDATETYPE}
         fi
     else
         # non-interactive mode
@@ -1846,10 +1598,6 @@ kernel_build_pass_1() {
         show "Installing modules..."
         ${MAKE} modules_install
     fi
-
-    show "Installing firmware..."
-    show "(where supported; in-kernel firmware was dropped in 4.14)"
-    ${MAKE} firmware_install || true
 }
 rebuild_external_modules_if_necessary() {
     if ((ARG_REBUILD_EXTERNAL_MODULES==1)); then
@@ -1877,8 +1625,6 @@ create_initramfs_using_genkernel() {
     # itself; also note, we build an uncompressed ramdisk, as the kernel
     # build process will compress it on integration into the
     # unified kernel image
-    # we suppress gpg here as we don't want to add gpg v2 which is installed,
-    # but rather our static gpg v1, which will be inserted into the initramfs
     local PLYMOUTH_OPTS=""
     if [ -n "${PLYMOUTHTHEME}" ]; then
         PLYMOUTH_OPTS="--plymouth --plymouth-theme=${PLYMOUTHTHEME}"
@@ -1910,25 +1656,7 @@ unpack_initramfs() {
     fi
     (cd "${INITRAMFSDIR}"; cpio --extract --file="${UNCOMPRESSEDINITRAMFS}")
 }
-build_static_gpg() {
-    # gnupg not slotted unfortunately, so we do this instead
-    show "Building static gpg 1.x for use in initramfs..."
-    emerge ${VERBOSITYFLAG} "app-crypt/staticgpg"
-}
 modify_initramfs() {
-    if [ -n "${LUKSKEYFILE}" ]; then
-        if [ ! -x "${GPG1PATHFROM}" ]; then
-            if ((ARG_ASK==1)); then
-                continue_yn "No static gpg found, would you like to build it?"
-            else
-                show "No static gpg found, so creating one..."
-            fi
-            build_static_gpg
-        fi
-        show "Copying static gpg program into initramfs..."
-        cp ${VERBOSITYFLAG} "${GPG1PATHFROM}" "${GPG1PATHTO}"
-    fi
-
     if ((USINGMODULES==1)); then
         show "Copying contents of ${MODPROBEDIR} directory into initramfs..."
         if [ "$(ls -A ${MODPROBEDIR})" ]; then
@@ -1953,7 +1681,7 @@ kernel_build_pass_2() {
     ${MAKE} -j ${NUMCPUSPLUSONE}
     show "Installing boot files to ${BOOTDIR}; for reference only..."
     ${MAKE} install
-    # no need to re-install modules or firmware - only the initramfs has changed
+    # no need to re-install modules - only the initramfs has changed
 }
 sign_kernel_if_possible() {
     if [ -s "${BOOTDIR}/${VMLINUZNAME}${SIGNEDSUFFIX}" ]; then
@@ -1986,7 +1714,7 @@ check_if_enough_disk_space_for_backups() {
     if [ -s "${FULLEFIBOOTDIR}/${EFIBOOTFILE}" ]; then
         OLDKERNSIZEKB="$(stat --format="%s" "${FULLEFIBOOTDIR}/${EFIBOOTFILE}")"
         OLDKERNSIZEKB=$((OLDKERNSIZEKB/1024))
-    fi 
+    fi
     if [ -s "${FULLEFIBOOTDIR}/${EFICONFIGFILE}" ]; then
         OLDCONFIGSIZEKB="$(stat --format="%s" "${FULLEFIBOOTDIR}/${EFICONFIGFILE}")"
         OLDCONFIGSIZEKB=$((OLDCONFIGSIZEKB/1024))
@@ -2072,7 +1800,7 @@ finalize_efi_partition_and_unmount_if_desired() {
     sync
     echo
     DOUNMOUNT=0
-    
+
     if ((ARG_UNMOUNTATEND==1)); then
         # this trumps everything else
         DOUNMOUNT=1
@@ -2160,7 +1888,7 @@ Options:
   -r, --adjustment=N    add integer N to the make niceness -20<=N<=19
                         (the default is 19; this runs make at the lowest
                         priority to avoid slowing the system too much)
-  -s, --stage-only      prepare kernel in /boot as usual, but do not copy 
+  -s, --stage-only      prepare kernel in /boot as usual, but do not copy
                         to system partition
   -u, --unmount-at-end  umount the EFI system partition on successful exit
   -v, --verbose         display more information, where possible
@@ -2324,7 +2052,7 @@ ask_whether_to_proceed
 
 check_gcc_config_and_reset_if_necessary
 if_option_unset "ARG_STAGEONLY" ensure_efi_partition_mounted
-if ((ARG_COPYFROMSTAGING==0)); then    
+if ((ARG_COPYFROMSTAGING==0)); then
     enter_build_directory
     update_config_if_necessary
     conform_config_file
@@ -2335,7 +2063,7 @@ if ((ARG_COPYFROMSTAGING==0)); then
     rebuild_external_modules_if_necessary
     create_initramfs_using_genkernel
     unpack_initramfs
-    modify_initramfs            # make sure our static gpg is in there!
+    modify_initramfs
     repack_initramfs
     kernel_build_pass_2         # with real initramfs
     sign_kernel_if_possible     # if key/certificate available, for secure boot
